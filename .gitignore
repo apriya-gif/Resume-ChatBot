@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pkl
+resume.index
+venv/
+.env
