@@ -1,47 +1,43 @@
 import faiss
-import numpy as np
 import pickle
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer,pipeline
+from transformers import T5ForConditionalGeneration, T5Tokenizer
 from sentence_transformers import SentenceTransformer
+import numpy as np
+
+# Load models
+#t5_model = T5ForConditionalGeneration.from_pretrained("t5-large")
+#t5_tokenizer = T5Tokenizer.from_pretrained("t5-large")
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+model_name = "google/flan-t5-xl"  # or "google/flan-t5-xxl"
+t5_model = T5ForConditionalGeneration.from_pretrained(model_name)
+t5_tokenizer = T5Tokenizer.from_pretrained(model_name)
 
 # Load FAISS index and chunks
 index = faiss.read_index("models/resume.index")
 with open("models/chunks.pkl", "rb") as f:
     chunks = pickle.load(f)
 
-# Load embedding model
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+# Retrieve relevant chunks
+def retrieve_chunks(query, top_k=2):
+    q_emb = embedder.encode([query])
+    D, I = index.search(np.array(q_emb, dtype=np.float32), top_k)
+    return [chunks[i] for i in I[0]]
 
-# Load a CPU-friendly text generation model
-model_name = "google/flan-t5-base"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="cpu")
-generator = pipeline("text2text-generation", model=model, tokenizer=tokenizer)
+# Generate answer with T5
+def generate_answer(query, context):
+    input_text = f"question: {query} context: {context}"
+    inputs = t5_tokenizer.encode(input_text, return_tensors="pt", truncation=True, max_length=512)
+    outputs = t5_model.generate(inputs, max_length=200, num_beams=4, early_stopping=True)
+    return t5_tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-def query_resume(query, k=3):
-    query_embedding = embedding_model.encode([query])
-    distances, indices = index.search(np.array(query_embedding), k)
-    context = " ".join([chunks[i] for i in indices[0]])
-    context = context[:1000]
-    prompt = f"""
-You are a helpful assistant answering questions about Ameesha Priya's resume.
-Only use the context below to answer. 
-Summarize clearly and concisely in 3–4 sentences. 
-If the answer is not in the context, reply: "I don't know."
-
-Context:
-{context}
-
-Question: {query}
-"""
-
-    response = generator(prompt, max_new_tokens=200)[0]["generated_text"]
-    return response
-
-
-
-
+# Chat loop
 if __name__ == "__main__":
-    query = "Tell me about my projects"
-    answer = query_resume(query)
-    print("Answer:\n", answer)
+    print("Resume Chatbot ready! Ask me anything (type 'exit' to quit).")
+    while True:
+        query = input("You: ")
+        if query.lower() in ["exit", "quit"]:
+            break
+        relevant_chunks = retrieve_chunks(query, top_k=3)
+        context = " ".join(relevant_chunks)
+        answer = generate_answer(query, context)
+        print("Bot:", answer)
