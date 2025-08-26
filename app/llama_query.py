@@ -1,89 +1,157 @@
-import torch
+# app/llama_query.py
+import os, re, pickle, numpy as np, faiss, torch
+from typing import List, Tuple
 from sentence_transformers import SentenceTransformer
-import faiss
-import numpy as np
-import re
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
-# ---------------------------- Resume Text ----------------------------
-full_text =  '''AMEESHA PRIYA Software Engineer – Backend, Distributed & FullStack Systems apriya.gcp@gmail.com | (412) 499-6900 | linkedin.com/in/ameesha-priya-2a773a136 | github.com/apriya-gif SUMMARY Backend-focused Software Engineer with 4+ years architecting distributed systems across finance, healthcare, and e-commerce. Expert in building scalable microservices using Java, Kafka, Spring Boot, and Kubernetes on AWS/GCP/Azure. Proven track record delivering production-grade solutions with quantified business impact. TECHNICAL SKILLS Languages: Java, Python, SQL, JavaScript, TypeScript, HTML, CSS, GraphQL Frameworks & Libraries: Spring Boot, ReactJS, Node.js, JUnit, Mockito Cloud & DevOps: AWS, GCP, Azure, Docker, Kubernetes, Terraform, Helm, CloudFormation Data & Streaming: Kafka, Kinesis, Databricks, MongoDB, Redis, Cassandra, Neo4j, Spark, S3 Tools & Infrastructure: gRPC, Git, Postman, JIRA, VSCode, IntelliJ, Eclipse, SonarLint, Nginx, Jupyter PROFESSIONAL EXPERIENCE Software Development Engineer, Capstone Project January 2024 - December 2024 Sheetz (via Carnegie Mellon University) ● Scaled Sheetz's operations from 700 to 1300 stores by developing an event syndicator to streamline data flow into Databricks, enabling 85% faster data processing across retail locations. ● Identified optimal event streaming solution by evaluating Kafka, Kinesis, and Pulsar on AWS using Nginx & Apache JMeter, processing 500,000+ events/second and selecting Kafka for 40% superior performance. ● Increased system scalability by 75% and reduced critical system alerts by 40% using SolarWinds monitoring, ensuring seamless expansion capacity for 1.5x future growth. Software Development Engineer June 2022 - July 2023 Bank of America ● Delivered automation tools for Merrill Lynch derivative trading, eliminating 100% manual effort weekly and reducing SLA breaches by 60%. ● Improved production batch stability by 85% through automated monitoring systems, handling $50M+ daily trading volume. ● Led technical liaison role between US-India teams, reducing outage resolution time by 45% and supervised 3 engineers. ● Architected scalable microservices for counterparty risk management, processing 10K+ transactions daily. Software Development Engineer July 2021 - June 2022 Brillio ● Configured and refined API infrastructure by migrating SOAP based application to REST and adding JDBC for database-application connection. ● Improved code integration, and conducted extensive unit tests and endpoint testing using Postman achieving 85% coverage. ● Developed robust microservices using Spring Boot+ReactJS (backend+frontend framework). ● Enabled seamless data integration and migration in Verizon’s 5G domain by developing APIs, establishing a multi-source data pipeline through automation scripts and comprehensive documentation (LLD, HLD, flow diagrams). Associate Software Development Engineer August 2020 - July 2021 Accenture ● Delivered critical features and stability for AstraZeneca’s VeevaCRM solutions as the key developer for iPatient, managing feature implementations and bug fixes under tight deadlines reducing system downtime by 20%. ACADEMIC PROJECTS Stream Processing with Kafka and Samza - Developed and analyzed a real-time data processing system by using Apache Kafka as the messaging system to handle large streams of incoming data and Apache Samza for processing these streams with minimal delay on AWS. Containers: Docker and Kubernetes - Containerized and orchestrated microservices using Docker and Kubernetes on GCP and Azure, enabling scalable and reliable application deployment and management. Machine Learning on the Cloud - Implemented and deployed an end-to-end machine learning pipeline on GCP, enhancing model accuracy through feature engineering and hyperparameter tuning. EDUCATION School of Computer Science, Carnegie Mellon University December 2024 Master of Software Engineering (Courses: Cloud Computing, Software Architecture, WebApp / TA: Engineering Data Intensive Scalable Systems,QA) Kalinga Institute of Industrial Technology July 2020 Bachelor of Computer Science and Engineering AWARDS AND ACHIEVEMENTS ● Silver Award - Bank of America (Q! 2023) ● Top 4 – Accenture x Salesforce Hackathon (2021)'''
+# ---------------------------- Config ----------------------------
+MODEL_ID = "HuggingFaceH4/zephyr-7b-beta"   # chat-tuned, open
+# Alternative: MODEL_ID = "tiiuae/falcon-7b-instruct"
 
-# ---------------------------- Utilities ----------------------------
-def clean_context(text):
-    """Remove emails, phone numbers, and links to prevent copy-paste answers."""
-    text = re.sub(r'\S+@\S+', '', text)         # emails
-    text = re.sub(r'http\S+', '', text)         # links
+TOP_K = 5                 # retrieve this many sentences
+CTX_TOKEN_BUDGET = 900    # pack retrieved context up to ~900 tokens (safe on 4k ctx)
+MAX_NEW_TOKENS = 200
+TEMPERATURE = 0.2         # lower = more factual
+TOP_P = 0.9
+REPETITION_PENALTY = 1.1
+IDK_THRESHOLD = 0.25      # cosine sim threshold; if best < this -> "I don't know"
+
+MODELS_DIR = "models"
+INDEX_PATH = os.path.join(MODELS_DIR, "resume.index")
+CHUNKS_PATH = os.path.join(MODELS_DIR, "chunks.pkl")
+
+# ------------------------ Load retriever ------------------------
+if not (os.path.exists(INDEX_PATH) and os.path.exists(CHUNKS_PATH)):
+    raise FileNotFoundError(
+        "Missing FAISS index or chunks. Run: python app/build_index.py"
+    )
+
+index = faiss.read_index(INDEX_PATH)
+with open(CHUNKS_PATH, "rb") as f:
+    CHUNKS: List[str] = pickle.load(f)
+
+EMBEDDER = SentenceTransformer("all-MiniLM-L6-v2")
+
+# --------------------- Load chat LLM (4-bit) --------------------
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+if device != "cuda":
+    print("⚠️ No GPU detected. Generations will be slow and less accurate.")
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_compute_dtype=torch.float16,
+)
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_ID,
+    device_map="auto" if device == "cuda" else None,
+    quantization_config=bnb_config if device == "cuda" else None,
+    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+)
+model.eval()
+
+# ------------------------ Helper funcs --------------------------
+def clean_context(text: str) -> str:
+    text = re.sub(r'\S+@\S+', '', text)
+    text = re.sub(r'http\S+', '', text)
     text = re.sub(r'linkedin\.com\S+', '', text)
     text = re.sub(r'github\.com\S+', '', text)
     text = re.sub(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', '', text)
     return text.strip()
 
-def split_text_by_sentences(text):
-    """Split text into sentences using simple heuristic."""
-    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\!|\?)\s', text)
-    return [s.strip() for s in sentences if s.strip()]
+def search(query: str, top_k: int = TOP_K) -> List[Tuple[str, float]]:
+    q = EMBEDDER.encode([query], normalize_embeddings=True)
+    D, I = index.search(np.asarray(q, dtype="float32"), top_k)
+    # D are cosine sims because index is IP on normalized vectors
+    return [(CHUNKS[i], float(D[0][j])) for j, i in enumerate(I[0])]
 
-# ---------------------------- Device ----------------------------
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def pack_context(chunks_and_scores: List[Tuple[str, float]], token_budget: int) -> str:
+    ctx_parts = []
+    used = 0
+    for chunk, _ in chunks_and_scores:
+        t = tokenizer(chunk, add_special_tokens=False, return_tensors="pt")
+        length = t.input_ids.shape[1]
+        if used + length > token_budget:
+            break
+        ctx_parts.append(f"- {chunk}")
+        used += length
+    return "\n".join(ctx_parts)
 
-# ---------------------------- FAISS + Embeddings ----------------------------
-chunks = split_text_by_sentences(clean_context(full_text))
-embedder = SentenceTransformer('all-MiniLM-L6-v2')
-embeddings = embedder.encode(chunks)
-index = faiss.IndexFlatL2(embeddings.shape[1])
-index.add(np.array(embeddings, dtype=np.float32))
+def make_prompt(query: str, context: str, history: List[Tuple[str, str]]) -> str:
+    history_text = "\n".join([f"User: {q}\nAssistant: {a}" for q, a in history[-3:]])
+    system = (
+        "You are a helpful assistant for answering questions about Ameesha Priya's resume. "
+        "Only use the provided context. If the answer is not present, say exactly: \"I don't know.\" "
+        "Be concise (2-4 sentences), conversational, and avoid copying phrases verbatim from context."
+    )
+    user = (
+        f"Chat history (last 3 turns):\n{history_text}\n\n"
+        f"Question: {query}\n\n"
+        f"Context:\n{context}"
+    )
 
-def retrieve_top_sentences(query, top_k=3):
-    query_embedding = embedder.encode([query])
-    D, I = index.search(np.array(query_embedding, dtype=np.float32), top_k)
-    return [chunks[i] for i in I[0]]
+    # Prefer chat template if the tokenizer provides one
+    if hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    else:
+        # Generic fallback instruction style prompt
+        return f"<|system|>\n{system}\n<|user|>\n{user}\n<|assistant|>\n"
 
-# ---------------------------- TinyLlama Model ----------------------------
-model_name = "HuggingFaceTB/SmolLM2-360M"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    torch_dtype=torch.float16,
-    device_map="auto"
-)
+def generate(query: str, history: List[Tuple[str, str]]) -> str:
+    hits = search(query, TOP_K)
+    best_sim = hits[0][1] if hits else 0.0
+    if best_sim < IDK_THRESHOLD:
+        return "I don't know."
 
-# ---------------------------- Answer Generation ----------------------------
-def generate_answer(query, top_k=3):
-    relevant_chunks = retrieve_top_sentences(query, top_k=top_k)
-    merged_context = "\n".join(relevant_chunks)
+    context = pack_context(hits, CTX_TOKEN_BUDGET)
+    prompt = make_prompt(query, context, history)
 
-    prompt = f"""
-You are a helpful resume assistant. 
-ONLY answer based on CONTEXT. 
-If context does not contain the answer, respond with: "I don't know."
-
-Question: {query}
-CONTEXT:
-{merged_context}
-Answer:
-"""
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    outputs = model.generate(**inputs, max_new_tokens=120, do_sample=False)
-    answer = tokenizer.decode(outputs[0][inputs.input_ids.size(1):], skip_special_tokens=True).strip()
+    with torch.no_grad():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=MAX_NEW_TOKENS,
+            do_sample=False,                    # deterministic for factual answers
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
+            repetition_penalty=REPETITION_PENALTY,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.eos_token_id,
+        )
 
-    return answer or "I don't know"
+    # remove the prompt portion (causal models echo input)
+    gen_tokens = out[0][inputs["input_ids"].shape[1]:]
+    text = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
 
+    # very short/empty → fallback
+    if not text or text.lower() in {"", "i don't know"}:
+        return "I don't know."
+    # trim any trailing boilerplate
+    return re.sub(r"\s+", " ", text).strip()
 
-
-# ---------------------------- Chat Loop ----------------------------
-def chat():
+# -------------------------- CLI loop ----------------------------
+def main():
     print("Resume Chatbot ready! Type 'exit' or 'quit' to end.")
-    chat_history = []
-
+    history: List[Tuple[str, str]] = []
     while True:
-        query = input("You: ")
-        if query.lower() in ["exit", "quit"]:
+        q = input("You: ").strip()
+        if q.lower() in {"exit", "quit"}:
             print("Goodbye!")
             break
-
-        answer = generate_answer(query, top_k=3)
-        print("Bot:", answer)
-        chat_history.append((query, answer))
+        try:
+            a = generate(q, history)
+        except Exception as e:
+            a = f"(Error while generating: {e})"
+        print("Bot:", a)
+        history.append((q, a))
 
 if __name__ == "__main__":
-    chat()
+    main()
