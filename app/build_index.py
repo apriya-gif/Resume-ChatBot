@@ -14,6 +14,20 @@ def clean_context(text):
     text = re.sub(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', '', text)
     return text.strip()
 
+def split_into_chunks(text, chunk_size=80, overlap=20):
+    """
+    Splits text into chunks of ~chunk_size words with some overlap.
+    Example: chunk_size=80, overlap=20 → 1st chunk = words[0:80],
+    2nd chunk = words[60:140], etc.
+    """
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = " ".join(words[i:i+chunk_size])
+        if chunk:
+            chunks.append(chunk)
+    return chunks
+
 def split_sentences(text):
     # simple sentence splitter; enough for resumes
     parts = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\!|\?)\s', text)
@@ -28,7 +42,7 @@ if __name__ == "__main__":
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         full_text = f.read()
 
-    chunks = split_sentences(clean_context(full_text))
+    chunks = chunks = split_into_chunks(clean_context(full_text), chunk_size=80, overlap=20)
 
     # embed with cosine-normalized vectors
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
