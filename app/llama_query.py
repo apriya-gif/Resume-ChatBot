@@ -5,14 +5,15 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 # ---------------------------- Config ----------------------------
-MODEL_ID = "HuggingFaceH4/zephyr-7b-beta"   # chat-tuned, open
+MODEL_ID = "tiiuae/falcon-7b-instruct"
+   # chat-tuned, open
 # Alternative: MODEL_ID = "tiiuae/falcon-7b-instruct"
 
 TOP_K = 5                 # retrieve this many sentences
 CTX_TOKEN_BUDGET = 900    # pack retrieved context up to ~900 tokens (safe on 4k ctx)
 MAX_NEW_TOKENS = 200
-TEMPERATURE = 0.2         # lower = more factual
-TOP_P = 0.9
+TEMPERATURE = 0.3         # lower = more factual
+TOP_P = 0.95
 REPETITION_PENALTY = 1.1
 IDK_THRESHOLD = 0.25      # cosine sim threshold; if best < this -> "I don't know"
 
