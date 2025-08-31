@@ -7,7 +7,7 @@ from transformers import LlamaTokenizer, LlamaForCausalLM, GenerationConfig
 # -------------------
 # Load Model + Tokenizer
 # -------------------
-model_name = "decapoda-research/llama-7b-hf"  # change if you used another model
+model_name = "NousResearch/Llama-2-7b-chat-hf"  # change if you used another model
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 print(f"Loading model on {device}...")
