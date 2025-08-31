@@ -1,97 +1,78 @@
-import os
-import pickle
-import faiss
-import torch
 import gradio as gr
-from transformers import LlamaTokenizer, LlamaForCausalLM
-from sentence_transformers import SentenceTransformer
+import torch
+from llama_query import model, tokenizer, device, retrieve
+import time
 
 # -------------------
-# Load Model + Tokenizer
+# Chatbot state
 # -------------------
-model_name = "NousResearch/Llama-2-7b-chat-hf"
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-print(f"Loading model on {device}...")
-tokenizer = LlamaTokenizer.from_pretrained(model_name)
-model = LlamaForCausalLM.from_pretrained(
-    model_name,
-    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-    low_cpu_mem_usage=True
-).to(device)
-model.eval()
+chat_history = []
 
 # -------------------
-# Load FAISS index + chunks
+# Function to handle chat with typing effect
 # -------------------
-index_file = "models/resume.index"
-chunks_file = "models/chunks.pkl"
-
-print("Loading FAISS index and chunks...")
-index = faiss.read_index(index_file)
-with open(chunks_file, "rb") as f:
-    chunks = pickle.load(f)
-
-# -------------------
-# Sentence Transformer for embeddings
-# -------------------
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
-
-# -------------------
-# Helper: retrieve top-k chunks
-# -------------------
-def retrieve(query, k=3):
-    query_emb = embedder.encode([query])
-    D, I = index.search(query_emb, k)
-    return [chunks[i] for i in I[0] if i != -1]
-
-# -------------------
-# Gradio response function
-# -------------------
-def answer_question(query):
+def answer_question(user_input, history):
+    # Append user message first
+    history.append((user_input, ""))  
+    yield history, history  # immediate update to show user message
+    
+    # Simulate bot typing
+    time.sleep(0.5)
+    
     # Retrieve relevant context
-    context_chunks = retrieve(query, k=3)
+    context_chunks = retrieve(user_input, k=3)
     if not context_chunks:
-        return "I don't know."
-
-    context_text = "\n".join(context_chunks)
-
-    # Build prompt with explicit instructions for detailed answers
-    prompt = (
-        f"You are a helpful assistant that answers questions about a resume in detail.\n"
-        f"Use complete sentences, provide examples, and be thorough.\n\n"
-        f"Resume content:\n{context_text}\n\n"
-        f"Question: {query}\n"
-        f"Answer:"
-    )
-
-    # Tokenize & generate
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=500,
-            do_sample=True,
-            temperature=0.7,
-            top_p=0.95,
-            repetition_penalty=1.2,
+        bot_answer = "I don't know."
+    else:
+        context_text = "\n".join(context_chunks)
+        prompt = (
+            f"You are an assistant answering questions about a resume.\n"
+            f"Here is the resume content:\n{context_text}\n\n"
+            f"Question: {user_input}\n"
+            f"Answer:"
         )
 
-    answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    if "Answer:" in answer:
-        answer = answer.split("Answer:")[-1].strip()
+        # Tokenize & generate
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=300,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.9,
+                repetition_penalty=1.2
+            )
 
-    return answer
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        if "Answer:" in answer:
+            answer = answer.split("Answer:")[-1].strip()
+        bot_answer = answer
+
+    # Update the last chat with bot response
+    history[-1] = (user_input, bot_answer)
+    yield history, history
 
 # -------------------
-# Launch Gradio UI
+# Gradio UI
 # -------------------
-iface = gr.Interface(
-    fn=answer_question,
-    inputs=gr.Textbox(lines=2, placeholder="Ask me about the resume..."),
-    outputs="text",
-    title="Resume ChatBot",
-    description="Ask questions about the resume and get detailed responses."
-)
+with gr.Blocks(css="""
+    .chatbot-message {
+        border-radius: 15px;
+        padding: 10px;
+        margin: 5px;
+        max-width: 70%;
+    }
+    .user-message { background-color: #DCF8C6; text-align: right; }
+    .bot-message { background-color: #F1F0F0; text-align: left; }
+""") as demo:
 
-iface.launch(server_name="0.0.0.0", server_port=7860, share=True)
+    gr.Markdown("## 📝 Resume ChatBot 💬")
+    chatbot = gr.Chatbot(elem_classes=["chatbot-message"])
+    message = gr.Textbox(label="Ask a question about your resume", placeholder="Type your question here and press Enter")
+    clear = gr.Button("Clear Chat")
+
+    message.submit(answer_question, [message, chatbot], [chatbot, chatbot])
+    clear.click(lambda: [], None, chatbot)
+
+demo.launch(share=True)
