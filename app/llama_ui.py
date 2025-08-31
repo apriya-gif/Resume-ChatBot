@@ -12,11 +12,14 @@ chat_history = []
 # Function to handle chat with typing effect
 # -------------------
 def answer_question(user_input, history):
-    # Append user message first
+    if not user_input:
+        return history, history
+    
+    # Append user message immediately
     history.append((user_input, ""))  
     yield history, history  # immediate update to show user message
     
-    # Simulate bot typing
+    # Optional typing effect
     time.sleep(0.5)
     
     # Retrieve relevant context
@@ -62,17 +65,24 @@ with gr.Blocks(css="""
         padding: 10px;
         margin: 5px;
         max-width: 70%;
+        word-wrap: break-word;
     }
     .user-message { background-color: #DCF8C6; text-align: right; }
     .bot-message { background-color: #F1F0F0; text-align: left; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 """) as demo:
 
     gr.Markdown("## 📝 Resume ChatBot 💬")
     chatbot = gr.Chatbot(elem_classes=["chatbot-message"])
-    message = gr.Textbox(label="Ask a question about your resume", placeholder="Type your question here and press Enter")
+    message = gr.Textbox(
+        label="Ask a question about your resume", 
+        placeholder="Type your question here and press Enter"
+    )
     clear = gr.Button("Clear Chat")
 
+    # Connect message submit to answer_question function
     message.submit(answer_question, [message, chatbot], [chatbot, chatbot])
     clear.click(lambda: [], None, chatbot)
 
-demo.launch(share=True)
+# Launch the app
+demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
