@@ -9,7 +9,7 @@ function App() {
   const handleAsk = async () => {
     setLoading(true);
     try {
-      const res = await axios.post("http://localhost:8000/query", { question: query });
+      const res = await axios.post("https://myresumebot.loca.lt/query", { question: query });
       setResponse(res.data.answer);
     } catch (err) {
       setResponse("Error: " + err.message);
