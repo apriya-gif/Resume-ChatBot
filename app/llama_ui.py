@@ -13,11 +13,9 @@ chat_history = []
 # -------------------
 def answer_question(user_input, history):
     history.append((user_input, ""))  
-    yield history, history  # immediate update to show user message
+    yield history, history  
     
-    time.sleep(0.5)  # typing delay
-    
-    # Retrieve relevant context
+    time.sleep(0.5)
     context_chunks = retrieve(user_input, k=3)
     if not context_chunks:
         bot_answer = "I don't know."
@@ -49,55 +47,89 @@ def answer_question(user_input, history):
     history[-1] = (user_input, bot_answer)
     yield history, history
 
+
 # -------------------
-# Gradio UI with WhatsApp-style bubbles
+# Gradio UI
 # -------------------
 with gr.Blocks(css="""
-    .chatbox {max-height: 600px; overflow-y: auto;}
-    .user-message {
-        background-color: #DCF8C6;
-        border-radius: 15px 15px 0px 15px;
-        padding: 10px;
-        margin: 5px;
-        display: inline-block;
-        text-align: left;
-        float: right;
-        clear: both;
-        max-width: 70%;
+    .profile-card {
+        background: #f9fafb;
+        border-radius: 15px;
+        padding: 20px;
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.05);
+        margin-bottom: 15px;
     }
-    .bot-message {
-        background-color: #EAEAEA;
-        border-radius: 15px 15px 15px 0px;
-        padding: 10px;
-        margin: 5px;
+    .skills span {
         display: inline-block;
-        text-align: left;
-        float: left;
-        clear: both;
-        max-width: 70%;
+        background: #e5e7eb;
+        color: #111827;
+        padding: 6px 12px;
+        margin: 4px;
+        border-radius: 20px;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    .link-btn a {
+        display: inline-block;
+        margin-right: 12px;
+        text-decoration: none;
+        color: white;
+        background: #2563eb;
+        padding: 6px 14px;
+        border-radius: 8px;
+        font-weight: 500;
     }
 """) as demo:
 
-    gr.Markdown("## 📝 Resume ChatBot 💬")
-    chatbot = gr.Chatbot(elem_classes=["chatbox"])
+    with gr.Row():
+        with gr.Column(scale=1):
+            gr.HTML("""
+            <div class="profile-card">
+                <h2 style="margin:0;">Ameesha Priya</h2>
+                <p style="margin:2px 0; color:#4b5563;">Software Engineer – Backend, Distributed & FullStack Systems</p>
+                <p style="margin:2px 0;">📧 apriya.gcp@gmail.com | 📱 (412) 499-6900</p>
+            </div>
+            <div class="profile-card">
+                <h3>Quick Facts</h3>
+                <ul style="margin:0; padding-left:16px; color:#374151;">
+                    <li>Experience: 3+ years</li>
+                    <li>Specialization: Distributed, Real-Time & Streaming Systems</li>
+                    <li>Domain: Finance, Retail, E-commerce</li>
+                </ul>
+            </div>
+            <div class="profile-card skills">
+                <h3>Core Skills</h3>
+                <span>Java</span><span>Spring Boot</span><span>Python</span><span>Distributed Systems</span><span>SQL</span><span>APIs</span>
+            </div>
+            <div class="profile-card link-btn">
+                <a href="https://linkedin.com/in/ameesha-priya-2a773a136" target="_blank">LinkedIn</a>
+                <a href="https://github.com/apriya-gif" target="_blank">GitHub</a>
+            </div>
+            """)
 
-    message = gr.Textbox(
-        label="Ask a question about your resume",
-        placeholder="Type your question here and press Enter"
-    )
-    clear = gr.Button("Clear Chat")
+        with gr.Column(scale=2):
+            gr.Markdown("## 💬 Resume Assistant")
+            chatbot = gr.Chatbot()
+            message = gr.Textbox(
+                label="Ask me about Ameesha's resume", 
+                placeholder="e.g., Tell me about your distributed systems experience"
+            )
+            
+            with gr.Row():
+                clear = gr.Button("Clear Chat")
+            
+            # Suggested questions
+            with gr.Row():
+                q1 = gr.Button("Tell me about your experience")
+                q2 = gr.Button("What are your core skills?")
+                q3 = gr.Button("What domains have you worked in?")
 
-    def render_chat(history):
-        rendered = []
-        for user, bot in history:
-            rendered.append((f'<div class="user-message">{user}</div>', 
-                             f'<div class="bot-message">{bot}</div>'))
-        return rendered
-
-    message.submit(answer_question, [message, chatbot], [chatbot, chatbot]).then(
-        render_chat, chatbot, chatbot
-    )
-    clear.click(lambda: [], None, chatbot)
+            # Events
+            message.submit(answer_question, [message, chatbot], [chatbot, chatbot])
+            clear.click(lambda: [], None, chatbot)
+            q1.click(lambda _: "Tell me about your experience", None, message)
+            q2.click(lambda _: "What are your core skills?", None, message)
+            q3.click(lambda _: "What domains have you worked in?", None, message)
 
 # -------------------
 # Launch
