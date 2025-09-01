@@ -2,7 +2,6 @@ import gradio as gr
 import torch
 from llama_query import model, tokenizer, device, retrieve
 import time
-import os
 
 # -------------------
 # Chatbot state
@@ -16,8 +15,7 @@ def answer_question(user_input, history):
     history.append((user_input, ""))  
     yield history, history  # immediate update to show user message
     
-    # Simulate bot typing
-    time.sleep(0.5)
+    time.sleep(0.5)  # typing delay
     
     # Retrieve relevant context
     context_chunks = retrieve(user_input, k=3)
@@ -52,41 +50,56 @@ def answer_question(user_input, history):
     yield history, history
 
 # -------------------
-# Gradio UI
+# Gradio UI with WhatsApp-style bubbles
 # -------------------
 with gr.Blocks(css="""
-    .chatbot-message {
-        border-radius: 15px;
+    .chatbox {max-height: 600px; overflow-y: auto;}
+    .user-message {
+        background-color: #DCF8C6;
+        border-radius: 15px 15px 0px 15px;
         padding: 10px;
         margin: 5px;
+        display: inline-block;
+        text-align: left;
+        float: right;
+        clear: both;
         max-width: 70%;
     }
-    .user-message { background-color: #DCF8C6; text-align: right; }
-    .bot-message { background-color: #F1F0F0; text-align: left; }
+    .bot-message {
+        background-color: #EAEAEA;
+        border-radius: 15px 15px 15px 0px;
+        padding: 10px;
+        margin: 5px;
+        display: inline-block;
+        text-align: left;
+        float: left;
+        clear: both;
+        max-width: 70%;
+    }
 """) as demo:
 
     gr.Markdown("## 📝 Resume ChatBot 💬")
-    chatbot = gr.Chatbot(elem_classes=["chatbot-message"])
-    message = gr.Textbox(label="Ask a question about your resume", placeholder="Type your question here and press Enter")
+    chatbot = gr.Chatbot(elem_classes=["chatbox"])
+
+    message = gr.Textbox(
+        label="Ask a question about your resume",
+        placeholder="Type your question here and press Enter"
+    )
     clear = gr.Button("Clear Chat")
 
-    message.submit(answer_question, [message, chatbot], [chatbot, chatbot])
+    def render_chat(history):
+        rendered = []
+        for user, bot in history:
+            rendered.append((f'<div class="user-message">{user}</div>', 
+                             f'<div class="bot-message">{bot}</div>'))
+        return rendered
+
+    message.submit(answer_question, [message, chatbot], [chatbot, chatbot]).then(
+        render_chat, chatbot, chatbot
+    )
     clear.click(lambda: [], None, chatbot)
 
 # -------------------
-# Auto-detect environment
+# Launch
 # -------------------
-def is_colab_or_remote():
-    try:
-        import google.colab
-        return True
-    except ImportError:
-        return False
-
-if is_colab_or_remote():
-    # Colab / remote: use 0.0.0.0 and share=True
-    link = demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
-    print(f"Open this link in your browser: {link}")
-else:
-    # Local machine: browser will auto-open
-    demo.launch(server_name="127.0.0.1", server_port=7860, share=True)
+demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
