@@ -22,7 +22,7 @@ threading.Thread(target=load_model).start()
 
 def answer_question(question, history):
     if not model_ready:
-        return history + [("", "Model is still loading, please wait...")], ""
+        return history + [[question, "🤖 Model is still loading, please wait a moment..."]], ""
     
     import llama_query
     with torch.no_grad():
@@ -64,12 +64,12 @@ Answer:"""
         if "Question:" in answer:
             answer = answer.split("Question:")[0].strip()
         
-        history.append((question, answer))
+        history.append([question, answer])
         return history, ""
 
 def submit_contact_form(name, email, message):
     if not name or not email or not message:
-        return "Please fill in all fields."
+        return "❌ Please fill in all fields.", name, email, message
     
     # Log the contact request (in real deployment, you'd email this to Ameesha)
     contact_info = f"""
@@ -80,12 +80,12 @@ def submit_contact_form(name, email, message):
     """
     print(contact_info)  # In production, send email instead
     
-    return f"Thank you {name}! Your message has been sent. Ameesha will reach out to you at {email} soon."
+    return f"✅ Thank you {name}! Your message has been sent. Ameesha will reach out to you at {email} soon.", "", "", ""
 
 custom_css = """
 .gradio-container {
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-    font-family: 'Inter', sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 .header-section {
@@ -94,45 +94,67 @@ custom_css = """
     margin-bottom: 2rem;
     border-radius: 12px;
     color: white;
+    box-shadow: 0 10px 25px rgba(8, 145, 178, 0.2);
 }
 
 .quick-facts {
-    background: rgba(15, 23, 42, 0.8);
+    background: rgba(15, 23, 42, 0.9);
     padding: 1.5rem;
     border-radius: 12px;
     border: 1px solid #334155;
     margin-bottom: 1rem;
+    backdrop-filter: blur(10px);
 }
 
 .skill-tag {
-    background: #0891b2;
+    background: linear-gradient(135deg, #0891b2, #06b6d4);
     color: white;
     padding: 0.5rem 1rem;
-    border-radius: 6px;
+    border-radius: 20px;
     margin: 0.25rem;
     display: inline-block;
     font-size: 0.875rem;
+    font-weight: 500;
+    box-shadow: 0 2px 8px rgba(8, 145, 178, 0.3);
 }
 
 .chat-container {
-    background: rgba(15, 23, 42, 0.6);
+    background: rgba(15, 23, 42, 0.8);
     border-radius: 12px;
     border: 1px solid #334155;
+    backdrop-filter: blur(10px);
+}
+
+.suggested-prompts button {
+    background: rgba(8, 145, 178, 0.1) !important;
+    border: 1px solid #0891b2 !important;
+    color: #06b6d4 !important;
+    border-radius: 20px !important;
+    padding: 0.5rem 1rem !important;
+    font-size: 0.875rem !important;
+    margin: 0.25rem !important;
+}
+
+.suggested-prompts button:hover {
+    background: rgba(8, 145, 178, 0.2) !important;
 }
 """
 
 with gr.Blocks(css=custom_css, title="Ameesha Priya - Resume Assistant") as iface:
     gr.HTML("""
     <div class="header-section">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div style="display: flex; align-items: center; gap: 1rem;">
-                <div style="width: 60px; height: 60px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 1.5rem;">
+                <div style="width: 70px; height: 70px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; border: 3px solid rgba(255,255,255,0.3);">
                     AP
                 </div>
                 <div>
-                    <h1 style="margin: 0; font-size: 2rem; font-weight: bold;">Ameesha Priya</h1>
-                    <p style="margin: 0; font-size: 1.1rem; opacity: 0.9;">Software Engineer – Backend, Distributed & FullStack Systems</p>
+                    <h1 style="margin: 0; font-size: 2.2rem; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.1);">Ameesha Priya</h1>
+                    <p style="margin: 0; font-size: 1.1rem; opacity: 0.95; font-weight: 400;">Software Engineer – Backend, Distributed & FullStack Systems</p>
                 </div>
+            </div>
+            <div>
+                <a href="data/resume.txt" download="Ameesha_Priya_Resume.txt" style="background: rgba(255,255,255,0.2); color: white; padding: 0.75rem 1.5rem; border-radius: 25px; text-decoration: none; font-weight: 600; border: 2px solid rgba(255,255,255,0.3); transition: all 0.3s ease;">📄 Download Resume</a>
             </div>
         </div>
     </div>
@@ -142,18 +164,18 @@ with gr.Blocks(css=custom_css, title="Ameesha Priya - Resume Assistant") as ifac
         with gr.Column(scale=1):
             gr.HTML("""
             <div class="quick-facts">
-                <h3 style="color: #06b6d4; margin-top: 0;">Quick Facts</h3>
-                <p><strong>Experience:</strong> 4+ years</p>
-                <p><strong>Education:</strong> MS Software Engineering, CMU</p>
-                <p><strong>Specialization:</strong> Distributed Systems</p>
-                <p><strong>Recent Role:</strong> SDE at Bank of America</p>
+                <h3 style="color: #06b6d4; margin-top: 0; font-size: 1.2rem; font-weight: 600;">⚡ Quick Facts</h3>
+                <p style="margin: 0.5rem 0;"><strong style="color: #e2e8f0;">Experience:</strong> <span style="color: #94a3b8;">4+ years</span></p>
+                <p style="margin: 0.5rem 0;"><strong style="color: #e2e8f0;">Education:</strong> <span style="color: #94a3b8;">MS Software Engineering, CMU</span></p>
+                <p style="margin: 0.5rem 0;"><strong style="color: #e2e8f0;">Specialization:</strong> <span style="color: #94a3b8;">Distributed Systems</span></p>
+                <p style="margin: 0.5rem 0;"><strong style="color: #e2e8f0;">Recent Role:</strong> <span style="color: #94a3b8;">SDE at Bank of America</span></p>
             </div>
             """)
             
             gr.HTML("""
             <div class="quick-facts">
-                <h3 style="color: #06b6d4; margin-top: 0;">Core Skills</h3>
-                <div>
+                <h3 style="color: #06b6d4; margin-top: 0; font-size: 1.2rem; font-weight: 600;">🛠️ Core Skills</h3>
+                <div style="margin-top: 1rem;">
                     <span class="skill-tag">Java</span>
                     <span class="skill-tag">Spring Boot</span>
                     <span class="skill-tag">Kafka</span>
@@ -166,20 +188,39 @@ with gr.Blocks(css=custom_css, title="Ameesha Priya - Resume Assistant") as ifac
             
             gr.HTML("""
             <div class="quick-facts">
-                <h3 style="color: #06b6d4; margin-top: 0;">Links</h3>
-                <p>🔗 <a href="#" style="color: #06b6d4;">LinkedIn</a></p>
-                <p>⭐ <a href="#" style="color: #06b6d4;">GitHub</a></p>
+                <h3 style="color: #06b6d4; margin-top: 0; font-size: 1.2rem; font-weight: 600;">🔗 Links</h3>
+                <p style="margin: 0.5rem 0;">🔗 <a href="#" style="color: #06b6d4; text-decoration: none; font-weight: 500;">LinkedIn</a></p>
+                <p style="margin: 0.5rem 0;">⭐ <a href="#" style="color: #06b6d4; text-decoration: none; font-weight: 500;">GitHub</a></p>
             </div>
             """)
+            
+            gr.HTML("""
+            <div class="quick-facts">
+                <h3 style="color: #06b6d4; margin-top: 0; font-size: 1.2rem; font-weight: 600;">📧 Contact Me</h3>
+                <p style="font-size: 0.875rem; color: #94a3b8; margin-bottom: 1rem;">Interested in connecting? Fill out the form below and I'll reach out personally.</p>
+            </div>
+            """)
+            
+            contact_name = gr.Textbox(label="Your Name", placeholder="Enter your full name", container=True)
+            contact_email = gr.Textbox(label="Your Email", placeholder="your.email@example.com", container=True)
+            contact_message = gr.Textbox(
+                label="Message", 
+                placeholder="Tell me about the opportunity...",
+                lines=3,
+                container=True
+            )
+            contact_submit = gr.Button("Send Message", variant="primary", size="sm")
+            contact_output = gr.Textbox(label="Status", interactive=False, visible=False)
         
         with gr.Column(scale=2):
-            gr.HTML('<div class="chat-container">')
+            gr.HTML('<div class="chat-container" style="padding: 1.5rem;">')
             gr.Markdown("## 💬 Chat with Ameesha")
             gr.Markdown("Ask me anything about my experience, skills, or projects!")
             
             chatbot = gr.Chatbot(
-                value=[("", "Hi! I'm Ameesha Priya's interactive resume assistant. I can tell you about my experience, skills, projects, education, and more. Feel free to ask me anything!")],
-                height=400
+                value=[["", "Hi! I'm Ameesha Priya's interactive resume assistant. I can tell you about my experience, skills, projects, education, and more. Feel free to ask me anything!"]],
+                height=400,
+                type="messages"
             )
             
             with gr.Row():
@@ -192,45 +233,43 @@ with gr.Blocks(css=custom_css, title="Ameesha Priya - Resume Assistant") as ifac
             
             gr.HTML("""
             <div style="margin-top: 1rem;">
-                <p style="color: #94a3b8; font-size: 0.875rem;">Try asking:</p>
+                <p style="color: #94a3b8; font-size: 0.875rem; margin-bottom: 0.5rem;">💡 Try asking:</p>
             </div>
             """)
             
-            with gr.Row():
-                gr.Button("Tell me about your experience", size="sm")
-                gr.Button("What projects have you worked on?", size="sm")
-                gr.Button("What are your technical skills?", size="sm")
-                gr.Button("Tell me about your education", size="sm")
+            with gr.Row(elem_classes="suggested-prompts"):
+                exp_btn = gr.Button("Tell me about your experience", size="sm")
+                proj_btn = gr.Button("What projects have you worked on?", size="sm")
+                skills_btn = gr.Button("What are your technical skills?", size="sm")
+                edu_btn = gr.Button("Tell me about your education", size="sm")
             
             gr.HTML('</div>')
-    
-    with gr.Tab("📧 Contact Ameesha"):
-        gr.Markdown("## Get in Touch")
-        gr.Markdown("Interested in connecting? Fill out the form below and Ameesha will reach out to you personally.")
-        
-        with gr.Row():
-            with gr.Column():
-                contact_name = gr.Textbox(label="Your Name", placeholder="Enter your full name")
-                contact_email = gr.Textbox(label="Your Email", placeholder="your.email@example.com")
-                contact_message = gr.Textbox(
-                    label="Message", 
-                    placeholder="Tell me about the opportunity or how you'd like to connect...",
-                    lines=5
-                )
-                contact_submit = gr.Button("Send Message", variant="primary")
-                contact_output = gr.Textbox(label="Status", interactive=False)
     
     def handle_submit(message, history):
         return answer_question(message, history)
     
+    def handle_contact_submit(name, email, message):
+        return submit_contact_form(name, email, message)
+    
+    def use_suggested_prompt(prompt_text, history):
+        return answer_question(prompt_text, history), ""
+    
     submit_btn.click(handle_submit, [msg, chatbot], [chatbot, msg])
     msg.submit(handle_submit, [msg, chatbot], [chatbot, msg])
     
+    # Suggested prompt handlers
+    exp_btn.click(lambda h: use_suggested_prompt("Tell me about your experience", h), [chatbot], [chatbot, msg])
+    proj_btn.click(lambda h: use_suggested_prompt("What projects have you worked on?", h), [chatbot], [chatbot, msg])
+    skills_btn.click(lambda h: use_suggested_prompt("What are your technical skills?", h), [chatbot], [chatbot, msg])
+    edu_btn.click(lambda h: use_suggested_prompt("Tell me about your education", h), [chatbot], [chatbot, msg])
+    
     contact_submit.click(
-        submit_contact_form,
+        handle_contact_submit,
         [contact_name, contact_email, contact_message],
-        contact_output
+        [contact_output, contact_name, contact_email, contact_message]
     )
+    
+    contact_submit.click(lambda: gr.update(visible=True), outputs=contact_output)
 
 if __name__ == "__main__":
     iface.launch(server_name="0.0.0.0", server_port=7860, share=True)
