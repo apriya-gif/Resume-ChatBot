@@ -5,17 +5,22 @@ from flask import Flask, request, render_template_string, send_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # ================= CONFIG =================
-MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+DEVICE = "cpu"  # Force CPU usage for consistent local testing
 
 # Load model + tokenizer
-print("Loading model... this may take a few minutes")
+print("Loading lightweight model for local testing...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
-    torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
-    device_map="auto"
+    torch_dtype=torch.float32,  # Use float32 for CPU
+    device_map=None,  # Let it use CPU
+    low_cpu_mem_usage=True
 )
+model.to(DEVICE)
 
 app = Flask(__name__)
 
@@ -43,29 +48,22 @@ def generate_answer(user_msg: str) -> str:
     chunks = llama_retrieve(user_msg) or []
     context = "\n".join(chunks)
 
-    system_rules = """
-You are Ameesha Priya’s professional resume assistant.
+    system_rules = """You are Ameesha Priya's professional resume assistant.
 STRICT PRIVACY POLICY:
 - Never share phone numbers or private email addresses.
-- If asked for phone/email, reply exactly: "I’m sorry, I cannot share personal phone numbers or private email addresses. Please use the Contact form on this page to reach out."
+- If asked for phone/email, reply exactly: "I'm sorry, I cannot share personal phone numbers or private email addresses. Please use the Contact form on this page to reach out."
 - Focus only on professional topics from the provided resume context; do not invent details.
 Safe Contact Instruction:
-- Direct users to the on-page Contact form for reaching out.
-"""
+- Direct users to the on-page Contact form for reaching out."""
 
-    prompt = f"""{system_rules}
-Resume context:
-{context}
-
-Question: {user_msg}
-Answer:"""
+    prompt = f"<|system|>\n{system_rules}\n\nResume context:\n{context}\n<|user|>\n{user_msg}\n<|assistant|>\n"
 
     try:
         inputs = tokenizer(
             prompt,
             return_tensors="pt",
             truncation=True,
-            max_length=2048,
+            max_length=1024,  # Reduced context length for faster processing
             padding=True
         )
         inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
@@ -73,21 +71,25 @@ Answer:"""
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=180,
+                max_new_tokens=100,  # Reduced for faster generation
                 temperature=0.7,
                 top_p=0.9,
                 do_sample=True,
                 pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
             )
         resp = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        answer = resp.split("Answer:")[-1].strip()
+        if "<|assistant|>" in resp:
+            answer = resp.split("<|assistant|>")[-1].strip()
+        else:
+            answer = resp[len(prompt):].strip()
     except Exception as e:
         print("Error in generate_answer:", e)
         return "Sorry, an error occurred generating the response."
 
     # scrub contacts
     answer = re.sub(r'\S+@\S+', '[redacted]', answer)
-    answer = re.sub(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', '[redacted]', answer)
+    answer = re.sub(r'$$?\d{3}$$?[-.\s]?\d{3}[-.\s]?\d{4}', '[redacted]', answer)
     return answer
 
 # ================= ROUTES =================
@@ -218,6 +220,5 @@ def contact():
     
 if __name__ == "__main__":
     port = 7860
-    public_url = ngrok.connect(port)   # ✅ creates tunnel
-    print("Public URL:", public_url)
-    app.run(host="0.0.0.0", port=port)
+    print(f"Starting server on http://localhost:{port}")
+    app.run(host="0.0.0.0", port=port, debug=True)
