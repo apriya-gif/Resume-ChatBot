@@ -313,4 +313,16 @@ def download():
 
 if __name__ == "__main__":
     # flask run style: python app/app.py
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 7860)), debug=False)
+    import os
+    from pyngrok import ngrok
+    authtoken = os.getenv("NGROK_AUTH_TOKEN")
+    if not authtoken:
+        raise RuntimeError("Please set NGROK_AUTH_TOKEN environment variable before running app.py")
+    ngrok.set_auth_token(authtoken)
+
+    # Start Flask app
+    port = 7860
+    public_url = ngrok.connect(port)
+    print(f" * Public URL: {public_url}")
+
+    app.run(host="0.0.0.0", port=port)
