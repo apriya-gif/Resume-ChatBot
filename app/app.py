@@ -225,9 +225,9 @@ def chat():
         return jsonify({"answer": "Please ask a question."})
     chunks = llama_retrieve(question)
     context = "\\n".join(chunks)
-    prompt = f\"\"\"You are Ameesha Priya's AI assistant. Answer questions about her resume and background.
+    prompt = prompt = f"""You are Ameesha Priya's AI assistant. Answer questions about her resume and background.
 IMPORTANT: Do not share personal contact info. If asked, refer to contact form.
-Context:\\n{context}\\nQuestion: {question}\\nAnswer:\"\"\"
+Context:\n{context}\nQuestion: {question}\nAnswer:"""
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True).to(device)
     with torch.no_grad():
         outputs = model.generate(
