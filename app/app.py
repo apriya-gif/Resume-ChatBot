@@ -245,4 +245,20 @@ def download():
     return send_file("data/resume.txt", as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860)
+    import os
+    from pyngrok import ngrok
+
+    # Get token from env var
+    authtoken = os.getenv("NGROK_AUTH_TOKEN")
+    if not authtoken:
+        raise RuntimeError("Please set NGROK_AUTH_TOKEN environment variable before running app.py")
+
+    ngrok.set_auth_token(authtoken)
+
+    # Start Flask app
+    port = 7860
+    public_url = ngrok.connect(port)
+    print(f" * Public URL: {public_url}")
+
+    app.run(host="0.0.0.0", port=port)
+
