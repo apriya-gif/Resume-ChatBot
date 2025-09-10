@@ -1,264 +1,316 @@
-# app.py - Flask application for Resume ChatBot UI using Tailwind CSS
+# app.py — Privacy-first Flask UI with contact form and PII-guard
 
-from flask import Flask, render_template_string, request, jsonify, send_file
+from flask import Flask, request, jsonify, render_template_string, send_file
+import os, re, json, datetime
 import sys
 
-# Add app directory to path for llama imports (adjust path if needed)
+# Ensure app package on path for llama imports
 sys.path.append('app')
-from llama_ui import llama_retrieve, model, tokenizer, device
-import torch
+
+# Import existing RAG + model objects
+# - llama_retrieve: top-k text chunks from FAISS built by app/build_index.py
+# - model/tokenizer/device: HF transformers model already loaded in llama_ui/llama_query
+from llama_ui import llama_retrieve, model, tokenizer, device  # uses existing objects
 
 app = Flask(__name__)
 
-# Parse resume data for dynamic content
-with open('data/resume.txt', 'r') as f:
-    lines = [l.strip() for l in f.readlines() if l.strip()]
+# ---------- Resume parsing (no phone/email in UI) ----------
+# Expect data/resume.txt to exist; only derive non-PII fields for display
+NAME = "Ameesha Priya"
+TITLE = "Software Engineer – Backend, Distributed & Full‑Stack Systems"
 
-# Extract basic info
-name = lines[0]
-title = lines[1]
-contacts = [p.strip() for p in lines[2].split('|')]
-email = contacts[0]
-phone = contacts[1]
-linkedin_url = 'https://' + contacts[2] if contacts[2].startswith('linkedin') else contacts[2]
-github_url = 'https://' + contacts[3] if contacts[3].startswith('github') else contacts[3]
+# Minimal, resilient parsing so UI can render even if lines shift
+def read_resume_lines(path="data/resume.txt"):
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return [l.strip() for l in f.readlines() if l.strip()]
 
-# Extract quick facts
-experience = ""
-for line in lines:
-    if 'years' in line:
-        experience = line.split('years')[0].strip() + ' years'
-        break
-if not experience:
-    experience = "N/A"
+lines = read_resume_lines()
 
-education = ""
-for i, line in enumerate(lines):
-    if line.startswith("Master of Software Engineering"):
-        uni_line = lines[i-1] if i-1 >= 0 else ""
-        education = f"M.S. Software Engineering, {uni_line.split(',')[0]}"
-        break
-if not education:
-    education = "N/A"
+# Simple extractors (avoid exposing email/phone)
+def get_quick_facts(lines):
+    exp = "4+ years"
+    edu = "MS Software Engineering, CMU"
+    spec = "Distributed Systems"
+    recent = "SDE (Capstone/Recent Role)"
+    for i, l in enumerate(lines):
+        if "years" in l and "experience" in l.lower():
+            exp = re.findall(r"\d+\+?\s*years", l)[:1] or [exp]
+            exp = exp
+        if "Master" in l or "MS Software" in l:
+            edu = "MS Software Engineering, CMU"
+        if "Distributed" in l:
+            spec = "Distributed Systems"
+        if "Software Development Engineer" in l:
+            recent = "Software Development Engineer (Recent)"
+    return exp, edu, spec, recent
 
-specialization = ""
-if "Distributed" in title:
-    specialization = "Distributed Systems"
+EXP, EDU, SPEC, RECENT = get_quick_facts(lines)
 
-recent_role = ""
-for i, line in enumerate(lines):
-    if line.startswith("Software Development Engineer, Capstone"):
-        comp = lines[i+1] if i+1 < len(lines) else ""
-        if comp.endswith("University"):
-            comp = comp.split(" (")[0]
-        recent_role = f"Software Development Engineer at {comp}"
-        break
-if not recent_role:
-    recent_role = "Software Development Engineer"
+CORE_SKILLS = ["Java", "Spring Boot", "Kafka", "AWS", "Kubernetes", "Python"]
 
-# Core skills (example list)
-core_skills = ["Java", "Spring Boot", "Kafka", "AWS", "Kubernetes", "Python"]
+# Links (safe to show)
+LINKEDIN_URL = "#"
+GITHUB_URL = "#"
+for l in lines:
+    if "linkedin" in l.lower():
+        LINKEDIN_URL = ("https://" if not l.startswith("http") else "") + re.search(r"(linkedin\.com\S+)", l).group(1) if re.search(r"(linkedin\.com\S+)", l) else LINKEDIN_URL
+    if "github" in l.lower():
+        GITHUB_URL = ("https://" if not l.startswith("http") else "") + re.search(r"(github\.com\S+)", l).group(1) if re.search(r"(github\.com\S+)", l) else GITHUB_URL
 
-# Links
-links = [
-    {"name": "LinkedIn", "url": linkedin_url, "icon": "fab fa-linkedin"},
-    {"name": "GitHub", "url": github_url, "icon": "fab fa-github"},
-]
+# ---------- Server-side PII guard ----------
+PII_REGEX = re.compile(r"\b(phone|cell|mobile|number|call|text|whats?app|email|e-mail|mail id|contact\s+number)\b", re.I)
 
-@app.route("/")
+POLICY_REFUSAL = (
+    "I’m sorry, I cannot share personal phone numbers or private email addresses. "
+    "Please use the Contact form on this page to reach out."
+)
+
+# ---------- Generation helper ----------
+def generate_answer(user_msg: str) -> str:
+    # Server-side hard stop for PII requests
+    if PII_REGEX.search(user_msg or ""):
+        return POLICY_REFUSAL
+
+    chunks = llama_retrieve(user_msg) or []
+    context = "\n".join(chunks) if chunks else ""
+
+    system_rules = """
+You are Ameesha Priya’s professional resume assistant.
+STRICT PRIVACY POLICY:
+- Never share phone numbers or private email addresses.
+- If asked for phone/email, reply exactly: "I’m sorry, I cannot share personal phone numbers or private email addresses. Please use the Contact form on this page to reach out."
+- Focus only on professional topics from the provided resume context; do not invent details.
+Safe Contact Instruction:
+- Direct users to the on-page Contact form for reaching out.
+"""
+
+    prompt = f"""{system_rules}
+Resume context (scrubbed): 
+{context}
+
+Question: {user_msg}
+Answer:"""
+
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048).to(device)
+    with torch.no_grad():
+        outputs = model.generate(
+            inputs.input_ids,
+            max_new_tokens=180,
+            temperature=0.7,
+            top_p=0.9,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    resp = tokenizer.decode(outputs, skip_special_tokens=True)
+    answer = resp.split("Answer:")[-1].strip()
+    # Belt-and-suspenders: sanitize any accidental contact spill
+    answer = re.sub(r'\S+@\S+', '[redacted]', answer)
+    answer = re.sub(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', '[redacted]', answer)
+    return answer
+
+# ---------- Routes ----------
+@app.route("/", methods=["GET"])
 def index():
-    # HTML template with Tailwind CSS for styling
-    html = f'''
-<!DOCTYPE html>
+    # Tailwind via CDN; phone/email intentionally omitted
+    html = f"""
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Chat with Ameesha</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{NAME} – Resume Assistant</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-900 text-white min-h-screen">
-
-    <!-- Header -->
-    <header class="bg-gradient-to-r from-teal-600 to-blue-600 p-6 flex items-center justify-between">
-        <div>
-            <h1 class="text-3xl font-bold">{name}</h1>
-            <p class="text-xl">{title}</p>
-            <div class="mt-2 text-sm">
-                <span class="mr-4"><i class="fas fa-envelope"></i> {email}</span>
-                <span><i class="fas fa-phone"></i> {phone}</span>
-            </div>
-        </div>
-        <div>
-            <a href="/download" class="bg-blue-800 hover:bg-blue-700 text-white px-4 py-2 rounded">Download Resume</a>
-        </div>
-    </header>
-
-    <div class="flex flex-col md:flex-row flex-1">
-        <!-- Sidebar -->
-        <aside class="w-full md:w-1/3 lg:w-1/4 bg-gray-800 p-6">
-            <h2 class="text-xl font-semibold mb-4">Quick Facts</h2>
-            <div class="space-y-2">
-                <div class="flex justify-between text-gray-300">
-                    <span class="font-medium">Experience</span>
-                    <span>{experience}</span>
-                </div>
-                <div class="flex justify-between text-gray-300">
-                    <span class="font-medium">Education</span>
-                    <span>{education}</span>
-                </div>
-                <div class="flex justify-between text-gray-300">
-                    <span class="font-medium">Specialization</span>
-                    <span>{specialization}</span>
-                </div>
-                <div class="flex justify-between text-gray-300">
-                    <span class="font-medium">Recent Role</span>
-                    <span>{recent_role}</span>
-                </div>
-            </div>
-
-            <h2 class="text-xl font-semibold mt-6 mb-4">Core Skills</h2>
-            <div class="flex flex-wrap">
-'''
-    # Add skill tags
-    for skill in core_skills:
-        html += f'                <span class="bg-teal-700 text-white rounded-full px-3 py-1 mr-2 mb-2">{skill}</span>\n'
-    html += '''
-            </div>
-
-            <h2 class="text-xl font-semibold mt-6 mb-4">Links</h2>
-            <div class="space-y-2">
-'''
-    for link in links:
-        html += f'                <a href="{link["url"]}" target="_blank" class="flex items-center text-teal-200 hover:text-white"><i class="{link["icon"]} fa-lg mr-2"></i> {link["name"]}</a>\n'
-    html += '''
-            </div>
-        </aside>
-
-        <!-- Chat section -->
-        <main class="flex-1 p-6 flex flex-col">
-            <h2 class="text-2xl font-semibold mb-2">Chat with Ameesha</h2>
-            <p class="mb-4 text-gray-400">Ask me anything about my experience, skills, or projects!</p>
-            <div id="chat-area" class="flex-1 overflow-y-auto bg-gray-800 p-4 rounded-lg mb-4">
-                <!-- Assistant greeting message -->
-                <div class="flex items-start mb-4">
-                    <div class="bg-teal-600 text-white font-bold rounded-full flex items-center justify-center" style="width:40px; height:40px;">AP</div>
-                    <div class="bg-gray-700 text-white p-3 ml-2 rounded-lg max-w-prose">
-                        Hi! I'm Ameesha Priya's interactive resume assistant. I can tell you about my experience, skills, projects, education, and more. Feel free to ask me anything!
-                    </div>
-                </div>
-            </div>
-
-            <!-- Suggested prompts -->
-            <div class="mb-4 space-x-2">
-                <button onclick="setQuestion('Tell me about your experience')" class="bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">Tell me about your experience</button>
-                <button onclick="setQuestion('What projects have you worked on?')" class="bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">What projects have you worked on?</button>
-                <button onclick="setQuestion('What are your technical skills?')" class="bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">What are your technical skills?</button>
-                <button onclick="setQuestion('Tell me about your education')" class="bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">Tell me about your education</button>
-            </div>
-
-            <!-- Input area -->
-            <div class="flex">
-                <input id="chat-input" type="text" placeholder="Ask me anything about my background..." class="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l focus:outline-none" onkeydown="if(event.key === 'Enter') sendMessage();">
-                <button onclick="sendMessage()" class="bg-blue-600 hover:bg-blue-500 px-4 rounded-r">
-                    <i class="fas fa-paper-plane text-white"></i>
-                </button>
-            </div>
-        </main>
+<body class="min-h-screen bg-slate-900 text-slate-100">
+  <header class="bg-gradient-to-r from-cyan-600 to-blue-700">
+    <div class="max-w-7xl mx-auto px-6 py-6 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">{NAME}</h1>
+        <p class="text-sm opacity-90">{TITLE}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <a href="/download" class="px-4 py-2 rounded-md bg-white/10 hover:bg-white/20">Download Resume</a>
+      </div>
     </div>
+  </header>
 
-    <!-- Chat JS -->
-    <script>
-        function addMessage(role, text) {
-            const chatArea = document.getElementById('chat-area');
-            const wrapper = document.createElement('div');
-            wrapper.className = 'flex mb-4 ' + (role === 'user' ? 'justify-end' : 'justify-start');
-            const contentDiv = document.createElement('div');
-            contentDiv.className = (role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-white') + ' p-3 rounded-lg max-w-prose';
-            contentDiv.innerText = text;
-            if (role === 'assistant') {
-                const avatar = document.createElement('div');
-                avatar.className = 'bg-teal-600 text-white font-bold rounded-full flex items-center justify-center mr-2';
-                avatar.style.width = avatar.style.height = '40px';
-                avatar.innerText = 'AP';
-                wrapper.appendChild(avatar);
-                wrapper.appendChild(contentDiv);
-            } else {
-                wrapper.appendChild(contentDiv);
-            }
-            chatArea.appendChild(wrapper);
-            chatArea.scrollTop = chatArea.scrollHeight;
-        }
+  <main class="max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Left column -->
+    <aside class="lg:col-span-1 space-y-6">
+      <section class="bg-slate-800/60 border border-slate-700 rounded-xl p-5">
+        <h2 class="font-semibold mb-4">Quick Facts</h2>
+        <div class="space-y-3 text-sm">
+          <div><span class="text-slate-400">Experience:</span> {EXP}</div>
+          <div><span class="text-slate-400">Education:</span> {EDU}</div>
+          <div><span class="text-slate-400">Specialization:</span> {SPEC}</div>
+          <div><span class="text-slate-400">Recent Role:</span> {RECENT}</div>
+        </div>
+        <div class="mt-5">
+          <h3 class="text-sm font-semibold text-slate-300 mb-2">Core Skills</h3>
+          <div class="flex flex-wrap gap-2">
+            {''.join([f'<span class="px-2 py-1 text-xs rounded-full bg-slate-700">{s}</span>' for s in CORE_SKILLS])}
+          </div>
+        </div>
+        <div class="mt-5">
+          <h3 class="text-sm font-semibold text-slate-300 mb-2">Links</h3>
+          <div class="flex flex-col gap-2">
+            <a class="text-cyan-300 hover:underline" href="{LINKEDIN_URL}" target="_blank" rel="noopener">LinkedIn</a>
+            <a class="text-cyan-300 hover:underline" href="{GITHUB_URL}" target="_blank" rel="noopener">GitHub</a>
+          </div>
+        </div>
+      </section>
 
-        function sendMessage() {
-            const input = document.getElementById('chat-input');
-            const question = input.value.trim();
-            if (!question) return;
-            addMessage('user', question);
-            input.value = '';
-            fetch('/chat', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ question: question })
-            })
-            .then(response => response.json())
-            .then(data => {
-                addMessage('assistant', data.answer);
-            });
-        }
+      <!-- Contact form (no phone; sends to /contact) -->
+      <section class="bg-slate-800/60 border border-slate-700 rounded-xl p-5">
+        <h2 class="font-semibold mb-4">Contact</h2>
+        <form id="contact-form" class="space-y-3">
+          <input type="text" name="name" placeholder="Name" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2" required />
+          <input type="email" name="email" placeholder="Email" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2" required />
+          <input type="text" name="company" placeholder="Company (optional)" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2" />
+          <textarea name="message" placeholder="Message" rows="4" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2" required></textarea>
+          <!-- Honeypot -->
+          <input type="text" name="website" class="hidden" tabindex="-1" autocomplete="off" />
+          <!-- Consent -->
+          <label class="flex items-start gap-2 text-xs text-slate-300">
+            <input type="checkbox" name="consent" required class="mt-1" />
+            <span>I agree to be contacted and acknowledge the site’s Privacy Policy.</span>
+          </label>
+          <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-700 rounded px-3 py-2">Send</button>
+          <div id="contact-result" class="text-xs text-slate-300"></div>
+        </form>
+      </section>
+    </aside>
 
-        function setQuestion(text) {
-            document.getElementById('chat-input').value = text;
-            sendMessage();
-        }
-    </script>
+    <!-- Right: Chat -->
+    <section class="lg:col-span-2 bg-slate-800/60 border border-slate-700 rounded-xl p-5">
+      <h2 class="font-semibold mb-4">Chat with Ameesha</h2>
+      <div id="chat" class="h-[520px] overflow-y-auto space-y-3 pr-2">
+        <div class="bg-slate-700/50 rounded-lg p-3 text-sm">Hi! I’m an interactive resume assistant. Ask about experience, skills, projects, or education. I will not share phone numbers or private emails; please use the Contact form for outreach.</div>
+      </div>
+      <div class="mt-4 flex gap-2">
+        <input id="msg" class="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2" placeholder="Ask about my background..." />
+        <button id="send" class="bg-cyan-600 hover:bg-cyan-700 rounded px-4 py-2">Send</button>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button class="qx px-3 py-1 text-xs rounded bg-slate-700">Tell me about your experience</button>
+        <button class="qx px-3 py-1 text-xs rounded bg-slate-700">What projects have you worked on?</button>
+        <button class="qx px-3 py-1 text-xs rounded bg-slate-700">What are your technical skills?</button>
+        <button class="qx px-3 py-1 text-xs rounded bg-slate-700">Tell me about your education</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const chatEl = document.getElementById('chat');
+    const msgEl = document.getElementById('msg');
+    const sendBtn = document.getElementById('send');
+
+    function addBubble(text, role) {{
+      const div = document.createElement('div');
+      div.className = (role === 'user')
+        ? 'ml-auto max-w-[85%] bg-cyan-700/60 rounded-lg p-3 text-sm'
+        : 'max-w-[85%] bg-slate-700/50 rounded-lg p-3 text-sm';
+      div.textContent = text;
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }}
+
+    async function sendMessage(text) {{
+      if (!text) return;
+      addBubble(text, 'user');
+      msgEl.value = '';
+      const r = await fetch('/chat', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ message: text }})
+      }});
+      const data = await r.json();
+      addBubble(data.answer || 'Sorry, something went wrong.', 'assistant');
+    }}
+
+    sendBtn.onclick = () => sendMessage(msgEl.value.trim());
+    msgEl.addEventListener('keydown', (e) => {{
+      if (e.key === 'Enter' && !e.shiftKey) {{
+        e.preventDefault();
+        sendMessage(msgEl.value.trim());
+      }}
+    }});
+
+    document.querySelectorAll('.qx').forEach(b => b.onclick = () => sendMessage(b.textContent));
+
+    // Contact form
+    const cform = document.getElementById('contact-form');
+    const cres = document.getElementById('contact-result');
+    cform.addEventListener('submit', async (e) => {{
+      e.preventDefault();
+      const fd = new FormData(cform);
+      if (fd.get('website')) {{  // honeypot
+        cres.textContent = 'Submission blocked.';
+        return;
+      }}
+      const payload = Object.fromEntries(fd.entries());
+      const r = await fetch('/contact', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload)
+      }});
+      const data = await r.json();
+      cres.textContent = data.message || 'Sent.';
+      if (data.ok) cform.reset();
+    }});
+  </script>
 </body>
 </html>
-'''
-    return html
+    """
+    return render_template_string(html)
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json()
-    question = data.get("question", "")
-    if not question:
-        return jsonify({"answer": "Please ask a question."})
-    chunks = llama_retrieve(question)
-    context = "\\n".join(chunks)
-    prompt = prompt = f"""You are Ameesha Priya's AI assistant. Answer questions about her resume and background.
-IMPORTANT: Do not share personal contact info. If asked, refer to contact form.
-Context:\n{context}\nQuestion: {question}\nAnswer:"""
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True).to(device)
-    with torch.no_grad():
-        outputs = model.generate(
-            inputs.input_ids, max_new_tokens=150,
-            temperature=0.7, top_p=0.9, do_sample=True, pad_token_id=tokenizer.eos_token_id
-        )
-    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    answer = response.split("Answer:")[-1].strip()
-    if "Question:" in answer:
-        answer = answer.split("Question:")[0].strip()
-    return jsonify({"answer": answer})
+    data = request.get_json(force=True, silent=True) or {}
+    user_msg = (data.get("message") or "").strip()
+    if not user_msg:
+        return jsonify({"answer": "Please enter a message."})
+    try:
+        ans = generate_answer(user_msg)
+        return jsonify({"answer": ans})
+    except Exception as e:
+        return jsonify({"answer": "Sorry, an error occurred generating the response."})
 
-@app.route("/download")
+@app.route("/contact", methods=["POST"])
+def contact():
+    data = request.get_json(force=True, silent=True) or {}
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip()
+    company = (data.get("company") or "").strip()
+    message = (data.get("message") or "").strip()
+    honeypot = (data.get("website") or "").strip()
+    consent = str(data.get("consent") or "").lower() in ("true", "1", "on", "yes")
+
+    if honeypot:
+        return jsonify({"ok": False, "message": "Blocked."}), 400
+    if not (name and email and message and consent):
+        return jsonify({"ok": False, "message": "Please complete all required fields and consent."}), 400
+
+    os.makedirs("data", exist_ok=True)
+    row = {
+        "ts": datetime.datetime.utcnow().isoformat() + "Z",
+        "name": name, "email": email, "company": company, "message": message
+    }
+    with open("data/contact_submissions.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+
+    # In production, send email or integrate with a form backend here.
+    return jsonify({"ok": True, "message": f"Thank you {name}! Message received."})
+
+@app.route("/download", methods=["GET"])
 def download():
-    return send_file("data/resume.txt", as_attachment=True)
+    pdf_path = "data/resume.pdf"
+    if os.path.exists(pdf_path):
+        return send_file(pdf_path, as_attachment=True)
+    return "Resume PDF not found.", 404
 
 if __name__ == "__main__":
-    import os
-    from pyngrok import ngrok
-
-    # Get token from env var
-    authtoken = os.getenv("NGROK_AUTH_TOKEN")
-    if not authtoken:
-        raise RuntimeError("Please set NGROK_AUTH_TOKEN environment variable before running app.py")
-
-    ngrok.set_auth_token(authtoken)
-
-    # Start Flask app
-    port = 7860
-    public_url = ngrok.connect(port)
-    print(f" * Public URL: {public_url}")
-
-    app.run(host="0.0.0.0", port=port)
-
+    # flask run style: python app/app.py
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 7860)), debug=False)
