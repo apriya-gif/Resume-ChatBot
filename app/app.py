@@ -307,7 +307,7 @@ def contact():
 
 @app.route("/download", methods=["GET"])
 def download():
-    pdf_path = "data/resume.pdf"
+    pdf_path = "resume.pdf"
     if os.path.exists(pdf_path):
         return send_file(pdf_path, as_attachment=True)
     return "Resume PDF not found.", 404
