@@ -3,6 +3,7 @@
 from flask import Flask, request, jsonify, render_template_string, send_file
 import os, re, json, datetime
 import sys
+import torch 
 
 # Ensure app package on path for llama imports
 sys.path.append('app')
