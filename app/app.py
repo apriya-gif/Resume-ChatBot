@@ -10,8 +10,8 @@ SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 
 
 # ================= CONFIG =================
-MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-DEVICE = "cpu"  # Force CPU usage for consistent local testing
+MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Load model + tokenizer
 print("Loading lightweight model for local testing...")
@@ -21,8 +21,8 @@ if tokenizer.pad_token is None:
 
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
-    torch_dtype=torch.float32,  # Use float32 for CPU
-    device_map=None,  # Let it use CPU
+    torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+    device_map="auto"
     low_cpu_mem_usage=True
 )
 model.to(DEVICE)
