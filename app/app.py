@@ -34,45 +34,7 @@ NAME = "Ameesha Priya"
 TITLE = "Software Engineer – Backend, Distributed & FullStack Systems"
 
 RESUME_CONTENT = """
-AMEESHA PRIYA
-Software Engineer – Backend, Distributed & FullStack Systems
-
-SUMMARY
-Backend-focused Software Engineer with 4+ years architecting distributed systems across finance, healthcare, and e-commerce. Expert in building scalable microservices using Java, Kafka, Spring Boot, and Kubernetes on AWS/GCP/Azure. Proven track record delivering production-grade solutions with quantified business impact.
-
-TECHNICAL SKILLS
-Languages: Java, Python, SQL, JavaScript, TypeScript, HTML, CSS, GraphQL
-Frameworks & Libraries: Spring Boot, ReactJS, Node.js, JUnit, Mockito
-Cloud & DevOps: AWS, GCP, Azure, Docker, Kubernetes, Terraform, Helm, CloudFormation
-Data & Streaming: Kafka, Kinesis, Databricks, MongoDB, Redis, Cassandra, Neo4j, Spark, S3
-
-PROFESSIONAL EXPERIENCE
-Software Development Engineer, Capstone Project (January 2024 - December 2024) - Sheetz
-• Scaled Sheetz's operations from 700 to 1300 stores by developing an event syndicator
-• Identified optimal event streaming solution by evaluating Kafka, Kinesis, and Pulsar on AWS
-• Increased system scalability by 75% and reduced critical system alerts by 40%
-
-Software Development Engineer (June 2022 - July 2023) - Bank of America
-• Delivered automation tools for Merrill Lynch derivative trading, eliminating 100% manual effort weekly
-• Improved production batch stability by 85% through automated monitoring systems
-• Led technical liaison role between US-India teams, reducing outage resolution time by 45%
-
-Software Development Engineer (July 2021 - June 2022) - Brillio
-• Configured and refined API infrastructure by migrating SOAP to REST
-• Improved code integration with 85% test coverage using Postman
-• Developed robust microservices using Spring Boot + ReactJS
-
-Associate Software Development Engineer (August 2020 - July 2021) - Accenture
-• Delivered critical features for AstraZeneca's VeevaCRM solutions
-• Managed feature implementations reducing system downtime by 20%
-
-EDUCATION
-Master of Software Engineering - Carnegie Mellon University (December 2024)
-Bachelor of Computer Science and Engineering - Kalinga Institute of Industrial Technology (July 2020)
-
-AWARDS
-• Silver Award - Bank of America (Q1 2023)
-• Top 4 – Accenture x Salesforce Hackathon (2021)
+Insert Resume Context
 """
 
 CORE_SKILLS = [
