@@ -1,44 +1,63 @@
 Resume Chatbot – Project Journey
-Overview
-The goal of this project was to build a conversational assistant capable of answering questions about my resume using AI. The key challenge was ensuring the chatbot stays accurate, context-aware, and lightweight enough to run on a personal machine.
-Step 1: Chunking and Token Management
-The initial challenge was the token limit of large language models. Feeding the entire resume would exceed the input limits.
-Solution: Split the resume into smaller chunks:
-Started with sentence-level splitting using regex heuristics.
-Each chunk is concise enough to fit within model token constraints, while still retaining context.
-FAISS embeddings were used to index these chunks for fast semantic search. This allowed retrieval of the most relevant chunks per query, improving accuracy and relevance.
-Step 2: Exploring Models
-T5 / Flan-T5
-Pros: Good summarization, well-supported, instruction-tuned for Q&A.
-Cons: Larger models (T5-large, Flan-T5-large) were too heavy for CPU, slow for interactive use.
-Observations: Generated accurate answers but sometimes hallucinated or repeated content.
-CodeT5 / LLaMA / SmolLM2
-Tested CodeT5 for Q&A, but it sometimes returned technical snippets instead of plain English.
-TinyLLaMA / SmolLM2 was lightweight, GPU-efficient, and generated more concise answers, but occasionally drifted out of context.
-Model Selection Iterations
-Juggled between models trying to balance:
-Accuracy (answers grounded in resume)
-Speed (response time in interactive chat)
-Resource usage (CPU vs GPU, memory constraints)
-Added context cleaning to remove emails, links, and phone numbers to prevent copy-paste hallucinations.
-Step 3: Retrieval + Generation Pipeline
-Semantic Search:
-Each query is embedded using SentenceTransformer.
-FAISS retrieves top relevant chunks.
-Generation:
-Selected chunks are passed to an LLM (current model: SmolLM2).
-Answers are constrained to retrieved context to reduce hallucinations.
-Optional: maintain chat history to improve conversational flow.
-Step 4: Lessons Learned
-Chunking is critical for token-limited models. Smaller chunks = better focus, but too small loses context.
-Model choice is a tradeoff:
-Large models → accurate but resource-heavy.
-Small models → fast, cheap, but sometimes miss details.
-Context cleaning prevents the model from repeating unwanted information like emails, phone numbers, or links.
-Combining retrieval with generation is key to grounding answers in actual resume content.
-Current Status
-The chatbot currently uses SmolLM2 + FAISS retrieval, which gives a fast, contextually relevant, and interactive experience.
-Ongoing experiments:
-Trying other lightweight instruction-tuned models for better CPU performance.
-Tweaking chunk sizes and retrieval strategy to reduce hallucinations.
-Adding better chat history integration for multi-turn conversations.
+📌 Overview
+The goal of this project was to build a conversational assistant that can answer questions about my resume in a natural, context-aware manner. The challenge was twofold:
+Ensuring accuracy and grounding in the actual resume content.
+Keeping the system lightweight enough to run on personal hardware without requiring massive compute resources.
+This journey involved experimenting with text chunking, embedding-based retrieval, and multiple language models — each with its own tradeoffs in speed, accuracy, and resource usage.
+🪜 Step 1: Chunking and Token Management
+A large language model (LLM) cannot ingest the entire resume in one go because of token limits. Directly feeding the resume text would exceed the model’s maximum input size and dilute relevance.
+Solution: Intelligent Chunking
+Used regex-based heuristics to split the resume at the sentence level.
+Each chunk was sized carefully to fit within token constraints while maintaining enough context to answer questions meaningfully.
+Created FAISS embeddings for each chunk, enabling semantic search over the resume.
+Why this matters: Instead of relying on raw string search, FAISS embeddings allow the chatbot to pull the most semantically relevant chunks for a given query. This retrieval step significantly improves accuracy and grounding of answers.
+🪜 Step 2: Exploring Models
+Once the retrieval pipeline was working, the next step was to experiment with different LLMs to balance:
+Accuracy (answers grounded in the resume)
+Speed (fast response times for interactive chat)
+Resource Usage (ability to run on CPU/GPU within personal constraints)
+🔹 T5 / Flan-T5
+Pros: Well-tuned for summarization and Q&A; strong performance.
+Cons: Larger versions (T5-large, Flan-T5-large) were too heavy for CPU-only inference, leading to slow response times.
+Observations: Generated high-quality answers, but occasionally hallucinated or repeated content.
+🔹 CodeT5 / LLaMA / SmolLM2
+CodeT5: Designed for code, sometimes returned technical snippets instead of natural language answers.
+TinyLLaMA / SmolLM2: Much more lightweight and GPU-efficient, producing concise answers. However, they occasionally drifted out of context.
+🔹 Model Selection Iterations
+I iterated across models, constantly balancing trade-offs:
+Larger models → Accurate and fluent, but demanded expensive GPUs.
+Smaller models → Faster and cheaper, but sometimes less precise.
+Added context cleaning (removing emails, phone numbers, links) to prevent hallucinations or irrelevant copy-paste answers.
+🪜 Step 3: Retrieval + Generation Pipeline
+The final architecture combined semantic retrieval with controlled generation.
+Semantic Search (Retrieval)
+Each query is embedded using SentenceTransformers.
+FAISS retrieves the top-k most relevant chunks.
+Generation (Answering)
+Retrieved chunks are passed to an LLM (currently SmolLM2).
+The LLM is constrained to answer only using retrieved context, reducing hallucinations.
+Optional chat history improves multi-turn conversations.
+This hybrid approach — Retrieval-Augmented Generation (RAG) — ensured answers were both context-aware and grounded in the actual resume.
+🪜 Step 4: Lessons Learned
+Chunking is critical: Too large = wasted tokens; too small = loss of context. Striking the right balance is key.
+Model trade-offs:
+Large models → Higher accuracy but resource-intensive.
+Small models → Lightweight and fast but risk missing detail.
+Context cleaning: Prevents the chatbot from echoing personal information or irrelevant links.
+RAG pipeline: Combining retrieval + generation dramatically improves answer grounding vs. pure generation.
+📌 Current Status
+The chatbot currently uses:
+SmolLM2 for inference (fast, lightweight).
+FAISS retrieval for grounding answers.
+A query pipeline that balances speed and accuracy while running smoothly on personal hardware.
+This setup delivers an interactive experience that is contextually relevant without requiring massive compute power.
+🔬 Ongoing Experiments
+Testing other lightweight instruction-tuned models for better CPU-only performance.
+Tuning chunk sizes and retrieval strategies to minimize hallucinations.
+Multi-turn conversation improvements (maintaining richer chat history).
+⚡ Next Challenge: Scaling Beyond Local GPUs
+While smaller models work well locally, larger models (like LLaMA2 or Meta’s newer research models) promise higher accuracy but require larger GPUs — which are costly to maintain personally.
+Exploration Path:
+Shifted testing to Google Colab and Kaggle, which provide free GPU runtimes for experimentation.
+These environments allowed me to run LLaMA2, Meta’s research releases, and other heavier models to benchmark performance.
+This approach balanced cost and accessibility, enabling experimentation with cutting-edge LLMs without needing personal high-end GPUs.
