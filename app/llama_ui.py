@@ -95,7 +95,7 @@ with gr.Blocks(css=custom_css, title="Ameesha Priya - Resume Assistant") as ifac
             gr.Markdown("Ask me anything about my experience, skills, or projects!")
             
             chatbot = gr.Chatbot(
-                value=[{"role": "assistant", "content": "Hi! I'm Ameesha Priya's interactive resume assistant. I can tell you about my experience, skills, projects, education, and more. Feel free to ask me anything!"}],
+                value=[{"role": "assistant", "content": "Hi! I'm XYZ's interactive resume assistant. I can tell you about my experience, skills, projects, education, and more. Feel free to ask me anything!"}],
                 height=400,
                 type="messages"
             )
